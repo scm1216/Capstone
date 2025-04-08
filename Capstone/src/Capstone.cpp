@@ -32,8 +32,8 @@
 
  uint8_t buf[30];
 
- const char* str[] = {
-  "sensor num: ", "PM1.0 concentration(CF=1,Standard particulate matter,unit:ug/m3): ",
+ const char* str[] = {"sensor num: ", 
+  "PM1.0 concentration(CF=1,Standard particulate matter,unit:ug/m3): ",
   "PM2.5 concentration(CF=1,Standard particulate matter,unit:ug/m3): ",
   "PM10 concentration(CF=1,Standard particulate matter,unit:ug/m3): ",
   "PM1.0 concentration(Atmospheric environment,unit:ug/m3): ",
@@ -138,3 +138,5 @@
       Serial.printf(str);
       Serial.println(value);
   }
+
+  //150
