@@ -10,8 +10,6 @@
  #include "Button.h"
  #include "Adafruit_BME280.h"
  #include <Wire.h>
- #include "Adafruit_LTR390.h"
-
 
  #define SENSOR_ADDRESS 0X40
 
@@ -20,6 +18,10 @@
 
  Button nextButton(D0);
  unsigned int lastSong;
+
+ //UV SENSOR
+ const int uvSensor = D14;
+ int valueUv;
 
  //BME SENSOR
  Adafruit_BME280 bme;
@@ -49,9 +51,6 @@
   void print_result(const char* str, uint16_t value);
   void atmosphericMatterRead(uint8_t* data);
 
-  Adafruit_LTR390 ltr = Adafruit_LTR390();
- 
-
 
  void setup() {
    Serial.begin(9600);
@@ -79,10 +78,10 @@
   else {
     Serial.printf("Instrumental Ready to Go\n");
    }
-   myDFPlayerVoice.volume(10);  //Set volume value. From 0 to 30
+   myDFPlayerVoice.volume(25);  //Set volume value. From 0 to 30
    myDFPlayerVoice.loop(1);  //Play the first mp3
    myDFPlayerVoice.enableLoopAll();
-   myDFPlayerInstru.volume(10);  //Set volume value. From 0 to 30
+   myDFPlayerInstru.volume(25);  //Set volume value. From 0 to 30
    myDFPlayerInstru.loop(1);  //Play the first mp3
    myDFPlayerInstru.enableLoopAll();
 
@@ -99,46 +98,7 @@
  Wire.endTransmission(false);
  
  //UV SENSOR
-
- Serial.begin(115200);
- Serial.println("Adafruit LTR-390 test");
-
- if ( ! ltr.begin() ) {
-   Serial.println("Couldn't find LTR sensor!");
-   while (1) delay(10);
- }
- Serial.println("Found LTR sensor!");
-
- ltr.setMode(LTR390_MODE_UVS);
- if (ltr.getMode() == LTR390_MODE_ALS) {
-   Serial.println("In ALS mode");
- } else {
-   Serial.println("In UVS mode");
- }
-
- ltr.setGain(LTR390_GAIN_3);
- Serial.print("Gain : ");
- switch (ltr.getGain()) {
-   case LTR390_GAIN_1: Serial.println(1); break;
-   case LTR390_GAIN_3: Serial.println(3); break;
-   case LTR390_GAIN_6: Serial.println(6); break;
-   case LTR390_GAIN_9: Serial.println(9); break;
-   case LTR390_GAIN_18: Serial.println(18); break;
- }
-
- ltr.setResolution(LTR390_RESOLUTION_16BIT);
- Serial.print("Resolution : ");
- switch (ltr.getResolution()) {
-   case LTR390_RESOLUTION_13BIT: Serial.println(13); break;
-   case LTR390_RESOLUTION_16BIT: Serial.println(16); break;
-   case LTR390_RESOLUTION_17BIT: Serial.println(17); break;
-   case LTR390_RESOLUTION_18BIT: Serial.println(18); break;
-   case LTR390_RESOLUTION_19BIT: Serial.println(19); break;
-   case LTR390_RESOLUTION_20BIT: Serial.println(20); break;
- }
-
- ltr.setThresholds(100, 1000);
- ltr.configInterrupt(true, LTR390_MODE_UVS);
+ pinMode (uvSensor,INPUT);
 }
  void loop() {
 
@@ -147,7 +107,7 @@
    humidRH = bme.readHumidity();
    tempF = (tempC*9/5)+32;
 
-     Serial.printf("Temp: %.2f%c\n ", tempF,DEGREE); 
+     Serial.printf("Temp: %.2f%\n ", tempF); 
      Serial.printf("Humi: %.2f%c\n",humidRH,PERCENT);
 
       read_sensor_value(buf,29); //Request 29 bytes of data
@@ -155,12 +115,12 @@
       lastTime = millis();
     
 //UV SENSOR
-if (ltr.newDataAvailable()) {
-  Serial.print("UV data: "); 
-  Serial.print(ltr.readUVS());
+valueUv = analogRead(uvSensor);
+Serial.printf("UV %i \n",valueUv);
 }
   }
-  }
+
+
   void read_sensor_value(uint8_t* data, uint32_t data_len){
     Wire.requestFrom(0x40, 29);
     for (int i = 0; i < data_len; i++){
