@@ -16,8 +16,8 @@
  DFRobotDFPlayerMini myDFPlayerVoice;
  DFRobotDFPlayerMini myDFPlayerInstru;
 
- Button nextButton(D0);
- unsigned int lastSong;
+//  Button nextButton(D0);
+//  unsigned int lastSong;
 
  //UV SENSOR
  const int uvSensor = D14;
@@ -29,12 +29,27 @@
  const int hexAddress = 0x76;
  unsigned int currentTime;
  unsigned int lastSecond;
- float tempC;
- float tempF;
+ float tempArray [10];
  float humidRH;
- const byte PERCENT = 37;
- const byte DEGREE  = 167;
  unsigned long lastTime, last;
+ 
+ //THRESHOLDS
+ const float OVERHEAT_THRESHOLD = 80; // 102.2 is considered Overheat in humans
+ const float COLD_THRESHOLD = 50.0;
+ const int UV_THRESHOLD = 750;
+
+ //ALERTS
+ bool overheatAlertSent= false;
+ bool coldAlertSent = false;
+ bool uvAlertSent = false;
+
+
+ int i;
+ int j;
+ float totalTemp = 0;
+ float avgTemp;
+ float currentTemp;
+
 
  uint8_t buf[30];
 
@@ -53,6 +68,7 @@
 
 
  void setup() {
+
    Serial.begin(9600);
    waitFor(Serial.isConnected,10000);
    Serial1.begin(9600);
@@ -78,7 +94,7 @@
   else {
     Serial.printf("Instrumental Ready to Go\n");
    }
-   myDFPlayerVoice.volume(25);  //Set volume value. From 0 to 30
+   myDFPlayerVoice.volume(10);  //Set volume value. From 0 to 30
    myDFPlayerVoice.loop(1);  //Play the first mp3
    myDFPlayerVoice.enableLoopAll();
    myDFPlayerInstru.volume(25);  //Set volume value. From 0 to 30
@@ -99,25 +115,64 @@
  
  //UV SENSOR
  pinMode (uvSensor,INPUT);
+
+
 }
  void loop() {
-
   if((millis()-lastTime) >1000){
-   tempC = bme.readTemperature();
-   humidRH = bme.readHumidity();
-   tempF = (tempC*9/5)+32;
+    lastTime = millis ();
 
-     Serial.printf("Temp: %.2f%\n ", tempF); 
-     Serial.printf("Humi: %.2f%c\n",humidRH,PERCENT);
+    currentTemp = ((bme.readTemperature())*(9.0/5.0)+32);
+    Serial.printf("Temp: %.2f\n ", currentTemp);  
 
-      read_sensor_value(buf,29); //Request 29 bytes of data
-      atmosphericMatterRead(buf);
-      lastTime = millis();
+    tempArray [i] = currentTemp;
+    Serial.printf("arr element: %i--- arr value: %f\n", i, tempArray[i]);
+    i++;
+
+    if (i == 10){
+      i=0;
+      totalTemp = 0;
+      avgTemp =0 ;
+      for (j=0; j<10; j++){
+        totalTemp = totalTemp + tempArray [j];
+
+      }     
+      avgTemp = totalTemp/10.0;
+      Serial.printf("average: %.2f\n ", avgTemp);  
+      if(avgTemp > OVERHEAT_THRESHOLD){
+        Serial.printf("Warning! High temperature detected");
+      }
+     
+    } 
     
-//UV SENSOR
-valueUv = analogRead(uvSensor);
-Serial.printf("UV %i \n",valueUv);
-}
+  }
+
+  // //         READINGS               //
+
+  // humidRH = bme.readHumidity();
+  
+ 
+  // Serial.printf("Humi: %.2f%c\n",humidRH,PERCENT);
+
+  // read_sensor_value(buf,29); //Request 29 bytes of data
+  // atmosphericMatterRead(buf);
+    
+  // valueUv = analogRead(uvSensor);
+  // Serial.printf("UV %i \n",valueUv);
+
+
+
+  // if(tempF > OVERHEAT_THRESHOLD){
+  //   if (overheatStart == 0){
+  //     overheatStart = millis();
+  //    } else if ((millis() -  overheatStart) >= OVERHEAT_DURATION) {
+  //     Serial.printoln("Warning! High temperature detected");
+  //     myDFPlayerVoice.play(2);
+  //     overheatStart = 0; //Restart alerts
+  //    }
+  //   } else {
+  //     overheatStart = 0;
+  //   }
   }
 
 
