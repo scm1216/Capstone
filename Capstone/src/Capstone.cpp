@@ -21,7 +21,12 @@
 
  //UV SENSOR
  const int uvSensor = D14;
- int valueUv;
+ float valueUv;
+ float uvArray [10];
+ int uvIndex;
+ int totalUv;
+ int k;
+ float avgUv;
 
  //BME SENSOR
  Adafruit_BME280 bme;
@@ -43,7 +48,7 @@
  bool coldAlertSent = false;
  bool uvAlertSent = false;
 
-
+float tempC;
  int i;
  int j;
  float totalTemp = 0;
@@ -69,66 +74,70 @@
 
  void setup() {
 
-   Serial.begin(9600);
-   waitFor(Serial.isConnected,10000);
-   Serial1.begin(9600);
-   Serial3.begin(9600);
-   delay(1000);
+  Serial.begin(9600);
+  waitFor(Serial.isConnected,10000);
+  Serial1.begin(9600);
+  Serial3.begin(9600);
+  delay(1000);
 
-   Serial.printf("DFRobot DFPlayer Mini Demo\n");
-   Serial.printf("Initializing DFPlayer ... (May take 3~5 seconds)\n");
+  Serial.printf("DFRobot DFPlayer Mini Demo\n");
+  Serial.printf("Initializing DFPlayer ... (May take 3~5 seconds)\n");
 
-   if (!myDFPlayerVoice.begin(Serial1)) {  //Use softwareSerial to communicate with mp3.
-     Serial.printf("Unable to start Voice:\n");
-     Serial.printf("1.Please recheck the connection!\n");
-     Serial.printf("2.Please insert the SD card!\n");
-   }
-   else {
-    Serial.printf("Voice Ready to Go\n");
-   }
-   if (!myDFPlayerInstru.begin(Serial3)) {  //Use softwareSerial to communicate with mp3.
-    Serial.printf("Unable to start Instrumental:\n");
+  if (!myDFPlayerVoice.begin(Serial1)) {  //Use softwareSerial to communicate with mp3.
+    Serial.printf("Unable to start Voice:\n");
     Serial.printf("1.Please recheck the connection!\n");
     Serial.printf("2.Please insert the SD card!\n");
   }
   else {
-    Serial.printf("Instrumental Ready to Go\n");
-   }
-   myDFPlayerVoice.volume(10);  //Set volume value. From 0 to 30
-   myDFPlayerVoice.loop(1);  //Play the first mp3
-   myDFPlayerVoice.enableLoopAll();
-   myDFPlayerInstru.volume(25);  //Set volume value. From 0 to 30
-   myDFPlayerInstru.loop(1);  //Play the first mp3
-   myDFPlayerInstru.enableLoopAll();
-
-  //BME 
-  status = bme.begin (hexAddress); 
-  if (status== false){
-  Serial.printf("BME280 at address 0x%02x failed to start", hexAddress);
+   Serial.printf("Voice Ready to Go\n");
   }
+  if (!myDFPlayerInstru.begin(Serial3)) {  //Use softwareSerial to communicate with mp3.
+   Serial.printf("Unable to start Instrumental:\n");
+   Serial.printf("1.Please recheck the connection!\n");
+   Serial.printf("2.Please insert the SD card!\n");
+ }
+ else {
+   Serial.printf("Instrumental Ready to Go\n");
+  }
+  myDFPlayerVoice.volume(20);  //Set volume value. From 0 to 30
+  // myDFPlayerVoice.loop(1);  //Play the first mp3
+  // myDFPlayerVoice.enableLoopAll();
+  // myDFPlayerInstru.volume(25);  //Set volume value. From 0 to 30
+  // myDFPlayerInstru.loop(1);  //Play the first mp3
+  // myDFPlayerInstru.enableLoopAll();
 
- //SENSOR
- Wire.begin();
- Wire.beginTransmission(0x40);
- Wire.write(0x88);
- Wire.endTransmission(false);
- 
- //UV SENSOR
- pinMode (uvSensor,INPUT);
+ //BME 
+ status = bme.begin (hexAddress); 
+ if (status== false){
+ Serial.printf("BME280 at address 0x%02x failed to start", hexAddress);
+ }
 
+//SENSOR
+Wire.begin();
+Wire.beginTransmission(0x40);
+Wire.write(0x88);
+Wire.endTransmission(false);
+
+//UV SENSOR
+pinMode (uvSensor,INPUT);
 
 }
  void loop() {
+
   if((millis()-lastTime) >1000){
     lastTime = millis ();
 
+    // ========= TEMPERATURE ===========
+
     currentTemp = ((bme.readTemperature())*(9.0/5.0)+32);
-    Serial.printf("Temp: %.2f\n ", currentTemp);  
+    if (currentTemp>190){
+      currentTemp = 0;
+      currentTemp = ((bme.readTemperature())*(9.0/5.0)+32);
+    }
 
     tempArray [i] = currentTemp;
-    Serial.printf("arr element: %i--- arr value: %f\n", i, tempArray[i]);
+    Serial.printf("arr TEMP: %i--- arr value: %.1f\n", i, tempArray[i]);
     i++;
-
     if (i == 10){
       i=0;
       totalTemp = 0;
@@ -138,14 +147,40 @@
 
       }     
       avgTemp = totalTemp/10.0;
-      Serial.printf("average: %.2f\n ", avgTemp);  
+      Serial.printf("average: %.1f\n ", avgTemp);  
+
+      // OVERHEATING ALERT
       if(avgTemp > OVERHEAT_THRESHOLD){
         Serial.printf("Warning! High temperature detected");
+        myDFPlayerVoice.play(1);
       }
-     
-    } 
-    
+       // COLD ALERT
+      if(avgTemp < COLD_THRESHOLD){
+        Serial.printf("Warning! Cold temperature detected");
+        myDFPlayerVoice.play(2);
+      }  
   }
+    // ========= UV ===========
+    valueUv = analogRead (uvSensor);
+    uvArray[uvIndex] = valueUv; 
+    Serial.printf("arr UV: %i--- arr value: %.1f\n", uvIndex, uvArray[uvIndex]);
+    uvIndex++;
+    if (uvIndex == 10) {
+      uvIndex = 0;
+      totalUv = 0;
+      for (int k = 0; k < 10; k++) {
+        totalUv = totalUv + uvArray [k];
+      }
+      avgUv = totalUv / 10.0;
+      Serial.printf("Avg UV: %.2f\n", avgUv);
+
+      if (avgUv>UV_THRESHOLD) {
+        Serial.println("Warning! UV exposure too high!");
+      }
+    }
+  }
+}
+
 
   // //         READINGS               //
 
@@ -173,7 +208,6 @@
   //   } else {
   //     overheatStart = 0;
   //   }
-  }
 
 
   void read_sensor_value(uint8_t* data, uint32_t data_len){
