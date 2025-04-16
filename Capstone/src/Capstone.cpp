@@ -10,14 +10,36 @@
  #include "Button.h"
  #include "Adafruit_BME280.h"
  #include <Wire.h>
+ #include <Adafruit_MQTT.h>
+ #include "Adafruit_MQTT/Adafruit_MQTT_SPARK.h"
+ #include "Adafruit_MQTT/Adafruit_MQTT.h"
+ #include "credentials.h"
+ #include "Seeed_HM330X.h"
 
- #define SENSOR_ADDRESS 0X40
+// Declare particulate sensor object
+HM330X PMsensor;
 
- DFRobotDFPlayerMini myDFPlayerVoice;
- DFRobotDFPlayerMini myDFPlayerInstru;
+DFRobotDFPlayerMini myDFPlayerVoice;
 
-//  Button nextButton(D0);
-//  unsigned int lastSong;
+//SYSTEM
+SYSTEM_MODE(AUTOMATIC);
+
+//ADAFRUIT.IO
+TCPClient TheClient; 
+// Setup the MQTT client class by passing in the WiFi client and MQTT server and login details. 
+Adafruit_MQTT_SPARK mqtt(&TheClient,AIO_SERVER,AIO_SERVERPORT,AIO_USERNAME,AIO_KEY); 
+/****************************** Feeds ***************************************/ 
+// Setup Feeds to publish or subscribe 
+Adafruit_MQTT_Publish HUM = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/auraHum");
+Adafruit_MQTT_Publish TEMP = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/auratemp");
+Adafruit_MQTT_Publish UV = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/auraUV");
+Adafruit_MQTT_Publish AIRQUALITY = Adafruit_MQTT_Publish(&mqtt, AIO_USERNAME "/feeds/auraairQ");
+/************Declare Functions and Variables*************/
+int buttonState;
+unsigned long publishTime;
+void MQTT_connect();
+bool MQTT_ping();
+
 
  //UV SENSOR
  const int uvSensor = D14;
@@ -39,38 +61,40 @@
  unsigned long lastTime, last;
  
  //THRESHOLDS
- const float OVERHEAT_THRESHOLD = 80; // 102.2 is considered Overheat in humans
- const float COLD_THRESHOLD = 50.0;
- const int UV_THRESHOLD = 750;
+ const float OVERHEAT_THRESHOLD = 90; // 102.2 is considered Overheat in humans
+ const float COLD_THRESHOLD = 60.0; // 50.0 is considered OverCold in humans
+ const int UV_THRESHOLD = 150;
+ const int AQ_THRESHOLD24 = 150;
+ const int AQ_THRESHOLD1 = 300;
 
- //ALERTS
- bool overheatAlertSent= false;
- bool coldAlertSent = false;
- bool uvAlertSent = false;
 
-float tempC;
- int i;
+ float tempC;
+ int i, p;
  int j;
  float totalTemp = 0;
  float avgTemp;
  float currentTemp;
+ float totalAq;
 
+// Declare variables and constants
+uint8_t buf[30];
+uint16_t pm10;
+int pm25;
+int m, sumPM10;
+float avgPM10;
 
- uint8_t buf[30];
+const char* str[] = {"sensor num: ", "PM1.0 concentration(CF=1,Standard particulate matter,unit:ug/m3): ",
+                     "PM2.5 concentration(CF=1,Standard particulate matter,unit:ug/m3): ",
+                     "PM10 concentration(CF=1,Standard particulate matter,unit:ug/m3): ",
+                     "PM1.0 concentration(Atmospheric environment,unit:ug/m3): ",
+                     "PM2.5 concentration(Atmospheric environment,unit:ug/m3): ",
+                     "PM10 concentration(Atmospheric environment,unit:ug/m3): ",
+                    };
 
- const char* str[] = {"sensor num: ", 
-  "PM1.0 concentration(CF=1,Standard particulate matter,unit:ug/m3): ",
-  "PM2.5 concentration(CF=1,Standard particulate matter,unit:ug/m3): ",
-  "PM10 concentration(CF=1,Standard particulate matter,unit:ug/m3): ",
-  "PM1.0 concentration(Atmospheric environment,unit:ug/m3): ",
-  "PM2.5 concentration(Atmospheric environment,unit:ug/m3): ",
-  "PM10 concentration(Atmospheric environment,unit:ug/m3): ",
-  };
  
-  void read_sensor_value(uint8_t* data, uint32_t data_len);
-  void print_result(const char* str, uint16_t value);
-  void atmosphericMatterRead(uint8_t* data);
-
+ HM330XErrorCode print_result(const char* str, uint16_t value);
+ HM330XErrorCode parse_result(uint8_t* data);
+ HM330XErrorCode parse_result_value(uint8_t* data);
 
  void setup() {
 
@@ -91,20 +115,20 @@ float tempC;
   else {
    Serial.printf("Voice Ready to Go\n");
   }
-  if (!myDFPlayerInstru.begin(Serial3)) {  //Use softwareSerial to communicate with mp3.
-   Serial.printf("Unable to start Instrumental:\n");
-   Serial.printf("1.Please recheck the connection!\n");
-   Serial.printf("2.Please insert the SD card!\n");
- }
- else {
-   Serial.printf("Instrumental Ready to Go\n");
-  }
   myDFPlayerVoice.volume(20);  //Set volume value. From 0 to 30
-  // myDFPlayerVoice.loop(1);  //Play the first mp3
-  // myDFPlayerVoice.enableLoopAll();
-  // myDFPlayerInstru.volume(25);  //Set volume value. From 0 to 30
-  // myDFPlayerInstru.loop(1);  //Play the first mp3
-  // myDFPlayerInstru.enableLoopAll();
+
+  if (PMsensor.init()) {
+    Serial.printf("HM330X init failed!!!\n");
+    while (1);
+}
+
+//ADAFRUIT.IO
+Serial.printf("Connecting to Internet \n");
+WiFi.connect();
+while(WiFi.connecting()) {
+  Serial.printf(".");
+}
+Serial.printf("\n Connected!!!!!! \n");
 
  //BME 
  status = bme.begin (hexAddress); 
@@ -112,23 +136,17 @@ float tempC;
  Serial.printf("BME280 at address 0x%02x failed to start", hexAddress);
  }
 
-//SENSOR
-Wire.begin();
-Wire.beginTransmission(0x40);
-Wire.write(0x88);
-Wire.endTransmission(false);
-
 //UV SENSOR
 pinMode (uvSensor,INPUT);
 
 }
- void loop() {
 
+ void loop() {
+  if (mqtt.Update()) {
   if((millis()-lastTime) >1000){
     lastTime = millis ();
 
-    // ========= TEMPERATURE ===========
-
+// ========= TEMPERATURE ===========
     currentTemp = ((bme.readTemperature())*(9.0/5.0)+32);
     if (currentTemp>190){
       currentTemp = 0;
@@ -136,7 +154,7 @@ pinMode (uvSensor,INPUT);
     }
 
     tempArray [i] = currentTemp;
-    Serial.printf("arr TEMP: %i--- arr value: %.1f\n", i, tempArray[i]);
+    // Serial.printf("arr TEMP: %i--- arr value: %.1f\n", i, tempArray[i]);
     i++;
     if (i == 10){
       i=0;
@@ -147,24 +165,30 @@ pinMode (uvSensor,INPUT);
 
       }     
       avgTemp = totalTemp/10.0;
-      Serial.printf("average: %.1f\n ", avgTemp);  
+      Serial.printf("Avg TEMP: %.1f\n ",avgTemp);
+      TEMP.publish (avgTemp);
 
-      // OVERHEATING ALERT
+// OVERHEATING ALERT
       if(avgTemp > OVERHEAT_THRESHOLD){
         Serial.printf("Warning! High temperature detected");
         myDFPlayerVoice.play(1);
       }
-       // COLD ALERT
+// COLD ALERT
       if(avgTemp < COLD_THRESHOLD){
+
         Serial.printf("Warning! Cold temperature detected");
         myDFPlayerVoice.play(2);
       }  
-  }
-    // ========= UV ===========
+     }
+// HUMIDITY
+      humidRH = bme.readHumidity();
+      HUM.publish (humidRH);
+// ========= UV ===========
     valueUv = analogRead (uvSensor);
     uvArray[uvIndex] = valueUv; 
-    Serial.printf("arr UV: %i--- arr value: %.1f\n", uvIndex, uvArray[uvIndex]);
+    // Serial.printf("arr UV: %i--- arr value: %.1f\n", uvIndex, uvArray[uvIndex]);
     uvIndex++;
+ 
     if (uvIndex == 10) {
       uvIndex = 0;
       totalUv = 0;
@@ -172,59 +196,67 @@ pinMode (uvSensor,INPUT);
         totalUv = totalUv + uvArray [k];
       }
       avgUv = totalUv / 10.0;
-      Serial.printf("Avg UV: %.2f\n", avgUv);
+      Serial.printf("Avg UV: %.2f\n",avgUv);
+      UV.publish (avgUv);
 
       if (avgUv>UV_THRESHOLD) {
         Serial.println("Warning! UV exposure too high!");
+        myDFPlayerVoice.play(3);
       }
+    }
+// ========= AIR QUALITY (PM10) ===========
+
+    if (PMsensor.read_sensor_value(buf, 29)) {
+      Serial.printf("HM330X read result failed!!!\n");
+    }
+    pm10 =buf [7*2] << 8 | buf [7*2+1];
+    Serial.printf("PM10 CONC: %i\n" ,pm10);
+    // AIRQUALITY.publish (pm10);
+    sumPM10 = sumPM10 + pm10;
+    if(m>=10){
+      m++;
+      avgPM10 = (float)sumPM10/m;
+      m = 0;
+      sumPM10=0;
+      if (avgPM10>AQ_THRESHOLD1) {
+      Serial.println("Warning! Pollution High!");
+      myDFPlayerVoice.play(4);
     }
   }
 }
-
-
-  // //         READINGS               //
-
-  // humidRH = bme.readHumidity();
-  
+  }
+}
+void MQTT_connect() {
+  int8_t ret;
  
-  // Serial.printf("Humi: %.2f%c\n",humidRH,PERCENT);
-
-  // read_sensor_value(buf,29); //Request 29 bytes of data
-  // atmosphericMatterRead(buf);
-    
-  // valueUv = analogRead(uvSensor);
-  // Serial.printf("UV %i \n",valueUv);
-
-
-
-  // if(tempF > OVERHEAT_THRESHOLD){
-  //   if (overheatStart == 0){
-  //     overheatStart = millis();
-  //    } else if ((millis() -  overheatStart) >= OVERHEAT_DURATION) {
-  //     Serial.printoln("Warning! High temperature detected");
-  //     myDFPlayerVoice.play(2);
-  //     overheatStart = 0; //Restart alerts
-  //    }
-  //   } else {
-  //     overheatStart = 0;
-  //   }
-
-
-  void read_sensor_value(uint8_t* data, uint32_t data_len){
-    Wire.requestFrom(0x40, 29);
-    for (int i = 0; i < data_len; i++){
-      data[i] = Wire.read();
-    }
+  // Return if already connected.
+  if (mqtt.connected()) {
+    return;
   }
-    void atmosphericMatterRead(uint8_t* data){
-    uint16_t value2 = 0;
-    int i = 7;
-    value2 = (uint16_t) data[i * 2] << 8 | data[i * 2 + 1];
-    print_result(str[i - 1], value2);
-    }
-  
-  void print_result(const char* str, uint16_t value){
-      Serial.printf(str);
-      Serial.println(value);
+ 
+  Serial.print("Connecting to MQTT... ");
+ 
+  while ((ret = mqtt.connect()) != 0) { // connect will return 0 for connected
+       Serial.printf("Error Code %s\n",mqtt.connectErrorString(ret));
+       Serial.printf("Retrying MQTT connection in 5 seconds...\n");
+       mqtt.disconnect();
+       delay(5000);  // wait 5 seconds and try again
   }
-  //150
+  Serial.printf("MQTT Connected!\n");
+}
+
+bool MQTT_ping() {
+  static unsigned int last;
+  bool pingStatus;
+
+  if ((millis()-last)>600000) {
+      Serial.printf("Pinging MQTT \n");
+      pingStatus = mqtt.ping();
+      if(!pingStatus) {
+        Serial.printf("Disconnecting \n");
+        mqtt.disconnect();
+      }
+      last = millis();
+  }
+  return pingStatus;
+}
