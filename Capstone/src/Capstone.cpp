@@ -50,6 +50,14 @@ bool MQTT_ping();
  int k;
  float avgUv;
 
+ //DUST SENSOR
+ float valueAq;
+ float aqArray [10];
+ int aqIndex;
+ int totalAq;
+ int m;
+ float avgAq;
+
  //BME SENSOR
  Adafruit_BME280 bme;
  bool status;
@@ -63,25 +71,21 @@ bool MQTT_ping();
  //THRESHOLDS
  const float OVERHEAT_THRESHOLD = 90; // 102.2 is considered Overheat in humans
  const float COLD_THRESHOLD = 60.0; // 50.0 is considered OverCold in humans
- const int UV_THRESHOLD = 150;
- const int AQ_THRESHOLD24 = 150;
- const int AQ_THRESHOLD1 = 300;
+ const int UV_THRESHOLD = 881; //UV index <8
+ const int AQ_THRESHOLD1 = 150;
 
 
  float tempC;
  int i, p;
  int j;
- float totalTemp = 0;
  float avgTemp;
+ float totalTemp;
  float currentTemp;
- float totalAq;
 
 // Declare variables and constants
 uint8_t buf[30];
 uint16_t pm10;
-int pm25;
-int m, sumPM10;
-float avgPM10;
+
 
 const char* str[] = {"sensor num: ", "PM1.0 concentration(CF=1,Standard particulate matter,unit:ug/m3): ",
                      "PM2.5 concentration(CF=1,Standard particulate matter,unit:ug/m3): ",
@@ -152,14 +156,13 @@ pinMode (uvSensor,INPUT);
       currentTemp = 0;
       currentTemp = ((bme.readTemperature())*(9.0/5.0)+32);
     }
-
     tempArray [i] = currentTemp;
     // Serial.printf("arr TEMP: %i--- arr value: %.1f\n", i, tempArray[i]);
     i++;
     if (i == 10){
       i=0;
       totalTemp = 0;
-      avgTemp =0 ;
+      // avgTemp =0 ;
       for (j=0; j<10; j++){
         totalTemp = totalTemp + tempArray [j];
 
@@ -210,15 +213,23 @@ pinMode (uvSensor,INPUT);
       Serial.printf("HM330X read result failed!!!\n");
     }
     pm10 =buf [7*2] << 8 | buf [7*2+1];
-    Serial.printf("PM10 CONC: %i\n" ,pm10);
-    // AIRQUALITY.publish (pm10);
-    sumPM10 = sumPM10 + pm10;
-    if(m>=10){
-      m++;
-      avgPM10 = (float)sumPM10/m;
-      m = 0;
-      sumPM10=0;
-      if (avgPM10>AQ_THRESHOLD1) {
+    // Serial.printf("PM10 CONC: %i\n" ,pm10);
+    valueAq = pm10;
+    aqArray [aqIndex] = valueAq;
+    // Serial.printf("arr AQ: %i--- arr value: %.1f\n", aqIndex, aqArray[aqIndex]);
+    aqIndex++;
+
+    if (aqIndex == 10) {
+      aqIndex = 0;
+      totalAq = 0;
+      for (int m = 0; m < 10; m++) {
+        totalAq = totalAq + aqArray [m];
+      }
+
+      avgAq = totalAq / 10.0;
+      Serial.printf("Avg AQ: %.2f\n",avgAq);
+      AIRQUALITY.publish (avgAq);
+      if (avgAq>AQ_THRESHOLD1) {
       Serial.println("Warning! Pollution High!");
       myDFPlayerVoice.play(4);
     }
